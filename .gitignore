@@ -38,6 +38,7 @@ venv.bak/
 
 # Test Results
 test_files/
+test_context_length/
 *.csv
 *_test_results.json
 latency_test_results.json
@@ -57,6 +58,17 @@ cuda/
 # Logs
 *.log
 logs/
+
+# Test Results
+test_files/
+test_context_length/
+*.csv
+*_test_results.json
+latency_test_results.json
+context_length_test_results.json
+
+DOWNLOAD.md/
+download_model.sh/
 
 # OS
 .DS_Store

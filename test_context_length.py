@@ -20,6 +20,12 @@ REPETITIONS = 5
 COOLDOWN_DELAY = 3  # seconds between combinations
 REPETITION_DELAY = 0.5  # seconds between repetitions
 
+# Base question (extracted from prompt)
+BASE_QUESTION = "What is artificial intelligence?"
+
+# Base question (extracted from prompt)
+BASE_QUESTION = "What is artificial intelligence?"
+
 # Base prompt template for generating context
 BASE_PROMPT = "What is artificial intelligence? Please provide a comprehensive explanation."
 CONTEXT_PADDING = """
@@ -126,6 +132,9 @@ def test_combination(context_length: int, output_length: int, repetition: int,
                 "output_length": output_length,
                 "repetition": repetition,
                 "status": "success",
+                "question": BASE_QUESTION,
+                "prompt": prompt,
+                "answer": response_text,
                 "latency": total_latency,
                 "throughput": tokens_per_second,
                 "output_tokens": tokens_generated,
@@ -138,6 +147,9 @@ def test_combination(context_length: int, output_length: int, repetition: int,
                 "output_length": output_length,
                 "repetition": repetition,
                 "status": "error",
+                "question": BASE_QUESTION,
+                "prompt": prompt,
+                "answer": None,
                 "status_code": response.status_code,
                 "error": response.text[:200],
                 "latency": total_latency,
@@ -153,6 +165,9 @@ def test_combination(context_length: int, output_length: int, repetition: int,
             "output_length": output_length,
             "repetition": repetition,
             "status": "timeout",
+            "question": BASE_QUESTION,
+            "prompt": prompt,
+            "answer": None,
             "latency": total_latency,
             "timestamp": datetime.now().isoformat()
         }
@@ -166,6 +181,9 @@ def test_combination(context_length: int, output_length: int, repetition: int,
             "output_length": output_length,
             "repetition": repetition,
             "status": "exception",
+            "question": BASE_QUESTION,
+            "prompt": prompt,
+            "answer": None,
             "error": str(e),
             "latency": total_latency,
             "timestamp": datetime.now().isoformat()
@@ -225,6 +243,7 @@ def calculate_statistics(results: List[Dict]) -> Dict:
 def save_context_csv(context_length: int, context_results: List[Dict], output_dir: str):
     """
     Save results for a specific context length to CSV file
+    Each row represents one test repetition with question, prompt, answer, and metrics
     
     Args:
         context_length: The context length being saved
@@ -233,7 +252,7 @@ def save_context_csv(context_length: int, context_results: List[Dict], output_di
     """
     csv_path = os.path.join(output_dir, f"context_{context_length}.csv")
     
-    # Organize results by output length
+    # Organize results by output length, then by repetition
     output_results = {}
     for result in context_results:
         output_len = result["output_length"]
@@ -241,48 +260,52 @@ def save_context_csv(context_length: int, context_results: List[Dict], output_di
             output_results[output_len] = []
         output_results[output_len].append(result)
     
+    # Sort results by output length, then by repetition
+    for output_len in output_results:
+        output_results[output_len].sort(key=lambda x: x["repetition"])
+    
     # Write CSV
-    with open(csv_path, 'w', newline='') as f:
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         
         # Header
         writer.writerow([
+            "context_length",
             "output_length",
-            "latency_mean",
-            "latency_min",
-            "latency_max",
-            "latency_std",
-            "throughput_mean",
-            "throughput_min",
-            "throughput_max",
-            "throughput_std",
-            "output_tokens_mean",
-            "output_tokens_min",
-            "output_tokens_max",
-            "successful_tests",
-            "total_tests"
+            "question",
+            "prompt",
+            "repetition",
+            "answer",
+            "latency",
+            "throughput",
+            "output_tokens",
+            "status"
         ])
         
         # Write rows for each output length (sorted)
         for output_len in sorted(OUTPUT_LENGTHS):
             if output_len in output_results:
-                stats = calculate_statistics(output_results[output_len])
-                writer.writerow([
-                    output_len,
-                    f"{stats['latency_mean']:.3f}" if stats['latency_mean'] is not None else "N/A",
-                    f"{stats['latency_min']:.3f}" if stats['latency_min'] is not None else "N/A",
-                    f"{stats['latency_max']:.3f}" if stats['latency_max'] is not None else "N/A",
-                    f"{stats['latency_std']:.3f}" if stats['latency_std'] is not None else "N/A",
-                    f"{stats['throughput_mean']:.2f}" if stats['throughput_mean'] is not None else "N/A",
-                    f"{stats['throughput_min']:.2f}" if stats['throughput_min'] is not None else "N/A",
-                    f"{stats['throughput_max']:.2f}" if stats['throughput_max'] is not None else "N/A",
-                    f"{stats['throughput_std']:.2f}" if stats['throughput_std'] is not None else "N/A",
-                    f"{stats['output_tokens_mean']:.1f}" if stats['output_tokens_mean'] is not None else "N/A",
-                    f"{stats['output_tokens_min']}" if stats['output_tokens_min'] is not None else "N/A",
-                    f"{stats['output_tokens_max']}" if stats['output_tokens_max'] is not None else "N/A",
-                    stats['successful_tests'],
-                    stats['total_tests']
-                ])
+                results = output_results[output_len]
+                # Get question from first result (should be same for all)
+                question = results[0].get("question", BASE_QUESTION) if results else BASE_QUESTION
+                
+                # Write each repetition as a separate row
+                for idx, result in enumerate(results):
+                    # Show question only in first row of each group
+                    question_value = question if idx == 0 else ""
+                    
+                    writer.writerow([
+                        context_length,
+                        output_len,
+                        question_value,
+                        result.get("prompt", ""),
+                        result.get("repetition", ""),
+                        result.get("answer", "") if result.get("status") == "success" else result.get("error", ""),
+                        f"{result.get('latency', 0):.3f}" if result.get("latency") is not None else "N/A",
+                        f"{result.get('throughput', 0):.2f}" if result.get("throughput") is not None else "N/A",
+                        result.get("output_tokens", "") if result.get("output_tokens") is not None else "",
+                        result.get("status", "")
+                    ])
     
     print(f"\n💾 Saved results to {csv_path}")
 
@@ -301,8 +324,8 @@ def main():
     print(f"Total combinations: {len(CONTEXT_LENGTHS) * len(OUTPUT_LENGTHS)}")
     print(f"Total tests: {len(CONTEXT_LENGTHS) * len(OUTPUT_LENGTHS) * REPETITIONS}")
     
-    # Create test_files directory
-    output_dir = "test_files"
+    # Create test_context_length directory
+    output_dir = "test_context_length"
     os.makedirs(output_dir, exist_ok=True)
     print(f"\n📁 Output directory: {output_dir}/")
     
@@ -411,6 +434,7 @@ def main():
     print(f"\n💾 Results saved to:")
     print(f"   - JSON: {json_path}")
     print(f"   - CSV files: {output_dir}/context_*.csv ({len(CONTEXT_LENGTHS)} files)")
+    print(f"   - Each CSV contains individual test results with question, prompt, and answers")
     print(f"\n{'='*70}")
     print("✅ Testing Complete!")
     print(f"{'='*70}\n")
