@@ -29,6 +29,35 @@ tokenizer: Optional[og.Tokenizer] = None
 template_str: Optional[str] = None
 
 
+def get_default_json_schema() -> str:
+    """
+    Get the default JSON schema for conversational flow responses.
+    
+    This schema enforces the structure expected by the LTFS conversational flow:
+    - bot_response: string (the bot's response text)
+    - extracted_data: object (extracted information from conversation)
+    - next_action: string (what action to take next)
+    - call_end_reason: string or null (reason to end call if applicable)
+    - conversation_notes: string (internal notes about the conversation)
+    
+    Returns:
+        str: JSON schema as a JSON string (for use with params.set_guidance)
+    """
+    schema = {
+        "type": "object",
+        "required": ["bot_response", "extracted_data", "next_action", "call_end_reason", "conversation_notes"],
+        "properties": {
+            "bot_response": {"type": "string"},
+            "extracted_data": {"type": "object"},
+            "next_action": {"type": "string"},
+            "call_end_reason": {"type": ["string", "null"]},
+            "conversation_notes": {"type": "string"}
+        },
+        "additionalProperties": False
+    }
+    return json.dumps(schema)
+
+
 def extract_final_response(text: str) -> str:
     """
     Extract only the final channel response, removing analysis tokens and special formatting.
@@ -110,6 +139,8 @@ class ChatCompletionRequest(BaseModel):
     do_sample: Optional[bool] = True
     stream: Optional[bool] = False
     system_prompt: Optional[str] = "You are a helpful AI assistant."
+    response_format: Optional[dict] = None  # OpenAI-compatible response format (e.g., {"type": "json_object"})
+    json_schema: Optional[str] = None  # Custom JSON schema as JSON string (for json_schema guidance)
 
 
 class ChatCompletionChoice(BaseModel):
@@ -253,6 +284,29 @@ async def chat_completions(request: ChatCompletionRequest):
         
         params.set_search_options(**search_options)
         
+        # Apply JSON schema guidance if requested
+        # Check for response_format={"type": "json_object"} or custom json_schema
+        json_schema_to_use = None
+        if request.json_schema:
+            # Use custom JSON schema if provided
+            json_schema_to_use = request.json_schema
+            print("🔷 Using custom JSON schema from request")
+        elif request.response_format and request.response_format.get("type") == "json_object":
+            # Use default JSON schema for OpenAI-compatible json_object format
+            json_schema_to_use = get_default_json_schema()
+            print("🔷 Using default JSON schema (response_format=json_object)")
+        
+        if json_schema_to_use:
+            try:
+                params.set_guidance("json_schema", json_schema_to_use)
+                print("✅ JSON schema guidance applied - model will be constrained to valid JSON structure")
+                # Ignoring the last end of text token as it messes up the generation when guidance is enabled
+                if len(input_tokens) > 0:
+                    input_tokens = input_tokens[:-1]
+            except Exception as e:
+                print(f"⚠️  Warning: Failed to apply JSON schema guidance: {e}")
+                print("   Continuing without guidance (fallback to prompt-based enforcement)")
+        
         # Create generator
         generator = og.Generator(model, params)
         generator.append_tokens(input_tokens)
@@ -338,6 +392,23 @@ async def stream_chat_completion(request: ChatCompletionRequest):
             search_options["repetition_penalty"] = request.repetition_penalty
         
         params.set_search_options(**search_options)
+        
+        # Apply JSON schema guidance if requested (same logic as non-streaming)
+        json_schema_to_use = None
+        if request.json_schema:
+            json_schema_to_use = request.json_schema
+        elif request.response_format and request.response_format.get("type") == "json_object":
+            json_schema_to_use = get_default_json_schema()
+        
+        if json_schema_to_use:
+            try:
+                params.set_guidance("json_schema", json_schema_to_use)
+                # Ignoring the last end of text token as it messes up the generation when guidance is enabled
+                if len(input_tokens) > 0:
+                    input_tokens = input_tokens[:-1]
+            except Exception as e:
+                # Silently continue without guidance for streaming
+                pass
         
         # Create generator
         generator = og.Generator(model, params)
